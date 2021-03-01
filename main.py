@@ -204,6 +204,12 @@ class Client(socketserver.BaseRequestHandler):
             self.request.send(message)
             self.request.send(b'\r\n')
 
+def server_lock(func):
+    def inner(self, *args):
+        with self._lock:
+            func(self, *args)
+    return inner
+
 class Server(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -291,11 +297,11 @@ class Server(socketserver.ThreadingTCPServer):
             self.shutdown()
             raise exception
 
+    @server_lock
     def _flush_unread_messages(self):
-        with self._lock:
-            for message in self.unread_private_messages:
-                self._private_message(message)
-            self.unread_private_messages.clear()
+        for message in self.unread_private_messages:
+            self._private_message(message)
+        self.unread_private_messages.clear()
 
     def _ogs_join(self, channel_name: str):
         if not comm_socket.comm_socket.connected:
@@ -314,7 +320,6 @@ class Server(socketserver.ThreadingTCPServer):
                 print('Join timeout reached')
                 self._join_timeout = None
                 comm_socket.disconnect()
-                comm_socket.repeated_tasks.clear()
                 comm_socket.sleep(comm_socket.comm_socket.reconnection_delay)
                 if not self.socket._closed:
                     comm_socket.connect()
@@ -354,6 +359,7 @@ class Server(socketserver.ThreadingTCPServer):
             self.ogs_part(channel_name)
         # TODO: anything else?
 
+    @server_lock
     def _chat_message(self, message: dict):
         m = message['message']['m']
         m = USERNAME_RE.sub(lambda m: m.group(1), m)
@@ -371,6 +377,7 @@ class Server(socketserver.ThreadingTCPServer):
             if message['channel'] not in client.channels: continue
             client._send(notify.encode())
 
+    @server_lock
     def _chat_join(self, message: dict):
         channel = message['channel']
 
@@ -398,7 +405,7 @@ class Server(socketserver.ThreadingTCPServer):
                 if mode_notify:
                     client._send(mode_notify.encode())
 
-
+    @server_lock
     def _chat_part(self, message: dict):
         channel = message['channel']
 
@@ -414,6 +421,7 @@ class Server(socketserver.ThreadingTCPServer):
             if channel not in client.channels: continue
             client._send(notify.encode())
 
+    @server_lock
     def _chat_topic(self, message: dict):
         channel = message['channel']
         topic = message['topic']
@@ -424,6 +432,7 @@ class Server(socketserver.ThreadingTCPServer):
             if channel not in client.channels: continue
             client._reply(332, f'#{channel} :{topic}')
 
+    @server_lock
     def _private_message(self, message: dict):
         m = message['message']['m']
 
@@ -434,19 +443,18 @@ class Server(socketserver.ThreadingTCPServer):
                 datetime.utcfromtimestamp(message['message']['t']).isoformat(),
                 m)
 
-        with self._lock:
-            if len(self.clients) == 0:
-                self.unread_private_messages.append(message)
-            else:
-                for client in self.clients:
-                    if message['from']['id'] == get_data()['user']['id']:
-                        x = client.nick
-                        y = username(message['to'])
-                    else:
-                        x = identity(message['from'])
-                        y = client.nick
+        if len(self.clients) == 0:
+            self.unread_private_messages.append(message)
+        else:
+            for client in self.clients:
+                if message['from']['id'] == get_data()['user']['id']:
+                    x = client.nick
+                    y = username(message['to'])
+                else:
+                    x = identity(message['from'])
+                    y = client.nick
 
-                    client._send((notify % (x, y)).encode())
+                client._send((notify % (x, y)).encode())
 
 
 def main():
