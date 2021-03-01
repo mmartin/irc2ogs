@@ -1,0 +1,6 @@
+[submodule "ogs_api"]
+	path = ogs_api
+	url = https://github.com/mmartin/ogs_api.git
+[submodule "ogs_utils"]
+	path = ogs_utils
+	url = https://github.com/flovo/ogs_utils.git
