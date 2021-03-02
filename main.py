@@ -48,10 +48,12 @@ class Channel:
     topic = None
     refs = 0
     users: typing.Dict[int, dict]
+    backlog: typing.Deque[int]
 
     def __init__(self, name):
         self.name = name
         self.users = dict()
+        self.backlog = collections.deque(maxlen=100)
 
     def join(self, user: dict):
         self.users[user['id']] = user
@@ -361,6 +363,13 @@ class Server(socketserver.ThreadingTCPServer):
 
     @server_lock
     def _chat_message(self, message: dict):
+        channel = message['channel']
+
+        if message['message']['i'] in self.channels[channel].backlog:
+            return
+
+        self.channels[channel].backlog.appendleft(message['message']['i'])
+
         m = message['message']['m']
         m = USERNAME_RE.sub(lambda m: m.group(1), m)
 
@@ -370,11 +379,11 @@ class Server(socketserver.ThreadingTCPServer):
         notify = '@time=%s :%s PRIVMSG #%s :%s' % (
                 datetime.utcfromtimestamp(message['message']['t']).isoformat(),
                 identity(message),
-                message['channel'],
+                channel,
                 m)
 
         for client in self.clients:
-            if message['channel'] not in client.channels: continue
+            if channel not in client.channels: continue
             client._send(notify.encode())
 
     @server_lock
@@ -449,7 +458,7 @@ class Server(socketserver.ThreadingTCPServer):
             for client in self.clients:
                 if message['from']['id'] == get_data()['user']['id']:
                     x = client.nick
-                    y = username(message['to'])
+                    y = username(get_data()['user'])
                 else:
                     x = identity(message['from'])
                     y = client.nick
